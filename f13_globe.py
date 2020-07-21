@@ -30,6 +30,10 @@ class Window(object):
         self.dockParameterTree.setWidget(self.parameterTree)
         self.dockParameterTree.setVisible(False)
 
+        self.plant = Plant()
+        self.plant.index.sigValueChanged.connect(self.track)
+        self.parameterTree.addParameters(self.plant)
+
         ### buttons
         self.restartButton = QtGui.QAction(self.mainWindow)
         self.restartButton.triggered.connect(self.restart)
@@ -37,13 +41,6 @@ class Window(object):
         iconRestart.addPixmap(QtGui.QPixmap("images/restart.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.restartButton.setIcon(iconRestart)
         self.toolBar.addAction(self.restartButton)
-
-        self.dryButton = QtGui.QAction(self.mainWindow)
-        self.dryButton.triggered.connect(self.draw_dryness)
-        iconDry = QtGui.QIcon()
-        iconDry.addPixmap(QtGui.QPixmap("images/fire.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
-        self.dryButton.setIcon(iconDry)
-        self.toolBar.addAction(self.dryButton)
 
         self.slowerButton = QtGui.QAction(self.mainWindow)
         self.slowerButton.triggered.connect(lambda: self.timer.start(1250))
@@ -74,6 +71,20 @@ class Window(object):
         self.toolBar.addAction(self.fasterButton)
         self.toolBar.addSeparator()
 
+        self.analyzeButton = QtGui.QAction(self.mainWindow)
+        self.analyzeButton.triggered.connect(self.track)
+        iconAnalyze = QtGui.QIcon()
+        iconAnalyze.addPixmap(QtGui.QPixmap("images/analyze.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.analyzeButton.setIcon(iconAnalyze)
+        self.toolBar.addAction(self.analyzeButton)
+
+        self.dryButton = QtGui.QAction(self.mainWindow)
+        self.dryButton.triggered.connect(self.draw_dryness)
+        iconDry = QtGui.QIcon()
+        iconDry.addPixmap(QtGui.QPixmap("images/fire.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.dryButton.setIcon(iconDry)
+        self.toolBar.addAction(self.dryButton)
+
         ### scatter plot
         self.plantPlot = gl.GLScatterPlotItem(pxMode=False)
         self.plantPlot.setGLOptions(opts="opaque")
@@ -92,6 +103,11 @@ class Window(object):
         self.plantPosEsf = None
         self.plantSize = None
         self.plantColor = None
+        self.plantDry = []
+        self.plantAltitude = []
+        self.plantLand = []
+        self.plantLight = []
+        self.plantTemperature = []
         self.geneColor = {}
         self.geneSpread = {}
 
@@ -126,6 +142,11 @@ class Window(object):
         self.plantColor = np.array([[0, 1, 0, 1]])
         self.plantPlot.setData(pos=self.plantPosCart, size=self.plantSize, color=self.plantColor)
 
+        self.plantDry = [self.globe.dryness(theta, phi)]
+        self.plantAltitude = [self.globe.height(theta, phi)]
+        self.plantLand = [self.globe.height(theta, phi) >= 0]
+        self.plantLight = [self.globe.lightness(theta, phi)]
+        self.plantTemperature = [self.globe.temperature(theta, phi)]
 
     def update(self):
         self.dockParameterTree.setVisible(False)
@@ -156,28 +177,43 @@ class Window(object):
                 phi = pos[2] + rand[1]
 
                 theta = theta % 2*np.pi
-                phi = phi % np.pi
-                self.birth(newGenotype, theta, phi)
+                if phi > 0 and phi < np.pi:
+                    self.birth(newGenotype, theta, phi)
 
         self.plants += self.temp
 
-    """
-    def track(self):                    #look at each plant individually
+    def track(self):
         self.timer.stop()
         self.dockParameterTree.setVisible(True)
 
         i = self.plant.index.value()
-        pos = self.pos[i]
+        cart = self.plantPosCart[i]
+        esf = self.plantPosEsf[i]
+
         self.plant.index.setLimits((0, len(self.plants)))
-        self.plant.xCoord.setValue(pos[0])
-        self.plant.yCoord.setValue(pos[1])
-        self.plant.zCoord.setValue(pos[2])
+
+        self.plant.rCoord.setValue(esf[0])
+        self.plant.thetaCoord.setValue(180-esf[1]*180/np.pi)
+        self.plant.phiCoord.setValue(90-esf[2]*180/np.pi)
+        if esf[2]*180/np.pi < 90:
+            self.plant.hemisphere.setValue('N')
+        else:
+            self.plant.hemisphere.setValue('S')
+
+        self.plant.temperature.setValue(self.plantTemperature[i])
+        self.plant.altitude.setValue(self.plantAltitude[i])
+        if self.plantLand[i]:
+            self.plant.region.setValue("Land")
+        else:
+            self.plant.region.setValue("Water")
+        self.plant.dryness.setValue(self.plantDry[i])
+        self.plant.lightness.setValue(self.plantLight[i])
+
         self.plant.genotype.setValue(self.plants[i])
-        self.plant.color.setValue(str(self.colors[i]))
-        colors = np.copy(self.colors)
+        self.plant.color.setValue(str(self.plantColor[i]))
+        colors = np.copy(self.plantColor)
         colors[i] = [1, 1, 1, 1]
-        self.scatterPlot.setData(color=colors)
-    """
+        self.plantPlot.setData(color=colors)
 
     def birth(self, genotype, theta, phi):
         def probabilityFunction(d):
@@ -191,6 +227,11 @@ class Window(object):
             self.plantPosEsf = np.append(self.plantPosEsf, [[self.globe.r(theta, phi)+0.1, theta, phi]], axis = 0)
             self.plantColor = np.append(self.plantColor, [self.color(genotype)], axis = 0)
             self.plantSize = np.append(self.plantSize, 0.5)
+            self.plantDry += [self.globe.dryness(theta, phi)]
+            self.plantAltitude += [self.globe.height(theta, phi)]
+            self.plantLand += [self.globe.height(theta, phi) >= 0]
+            self.plantLight += [self.globe.lightness(theta, phi)]
+            self.plantTemperature += [self.globe.temperature(theta, phi)]
             self.temp.append(genotype)
 
     def color(self, genotype):
@@ -299,13 +340,13 @@ class Globe():
         self.dryPlot.setData(pos=v, size=s, color=c)
 
     def temperature(self, theta, phi):
-        if height(theta, phi) < 0:
-            return np.cos(phi)**2 + 2
+        if self.height(theta, phi) < 0:
+            return 2 - 1/(np.sin(phi)**2 + 0.01)
         else:
-            return np.cos(phi)**2 + 2 - height(thetha, phi) - 0.5*np.sin(phi)**2*height(theta,phi)
+            return 2 - 1/(np.sin(phi)**2 + 0.01) - self.height(theta, phi) - 0.5*np.cos(phi)**2*self.height(theta,phi)
 
     def lightness(self, theta, phi):
-        return np.cos(phi)**2
+        return np.sin(phi)**2
 
     def dryness(self, theta, phi):
         if self.height(theta, phi) < 0:
@@ -372,10 +413,33 @@ class Surface():
     def cart(self, r, theta, phi):
         return [self.x(r, theta, phi), self.y(r, theta, phi), self.z(r, theta, phi)]
 
+class Plant(pt.parameterTypes.GroupParameter):
+    def __init__(self, **opts):
+        opts['name'] = 'Plant'
+        opts['type'] = 'bool'
+        opts['value'] = True
+        pt.parameterTypes.GroupParameter.__init__(self, **opts)
+
+        self.index = self.addChild({'name': 'Index', 'type': 'int', 'value': 0})
+        self.rCoord = self.addChild({'name': 'r', 'type': 'float', 'value': 0, 'readonly': True})
+        self.thetaCoord = self.addChild({'name': 'theta', 'type': 'float', 'value': 0, 'readonly': True})
+        self.phiCoord = self.addChild({'name': 'phi', 'type': 'float', 'value': 0, 'readonly': True})
+        self.hemisphere = self.addChild({'name': 'Hemisphere', 'type': 'str', 'value': 'N', 'readonly': True})
+        self.temperature = self.addChild({'name': 'Temperature', 'type': 'float', 'value': 0, 'readonly': True})
+        self.region = self.addChild({'name': 'Region', 'type': 'str', 'value': 'Land', 'readonly': True})
+        self.altitude = self.addChild({'name': 'Altitude', 'type': 'float', 'value': 0, 'readonly': True})
+        self.dryness = self.addChild({'name': 'Dryness', 'type': 'float', 'value': 0, 'readonly': True})
+        self.lightness = self.addChild({'name': 'Lightness', 'type': 'float', 'value': 0, 'readonly': True})
+
+        self.genotype = self.addChild({'name': 'Genotype', 'type': 'str', 'value': '', 'readonly': True})
+        self.color = self.addChild({'name': 'Color RGBalpha', 'type': 'str', 'value': '(0, 0, 0, 0)', 'readonly': True})
+
+
+
 def main():
     app = QtGui.QApplication([])
     window = QtGui.QMainWindow()
-    window.setWindowTitle('f12')
+    window.setWindowTitle('f13')
     window.resize(1000,600)
     window.show()
     ui = Window()
